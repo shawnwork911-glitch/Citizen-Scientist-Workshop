@@ -325,7 +325,8 @@ button.secondary:hover{background:var(--lichen)}
     <form id="payForm" novalidate style="display:none">
       <div class="form-head">
         <h2>Complete your payment</h2>
-        <p>Your reference: <strong id="payRef"></strong></p>
+        <p style="margin-bottom:.35rem">Your reference: <strong id="payRef"></strong></p>
+        <p id="payForLine">Payment for <strong id="payFor"></strong></p>
       </div>
       <div class="holdnote" id="holdNote" role="status"></div>
         <fieldset>
@@ -349,7 +350,7 @@ button.secondary:hover{background:var(--lichen)}
           <span class="hint">JPG, PNG or PDF, up to 5 MB.</span>
           <span class="err" id="proofErr">Upload your payment receipt.</span>
         </div>
-              <div class="field-wrap">
+              <div class="field-wrap" id="payEmailWrap">
           <label for="payEmail">Email you registered with</label>
           <input type="email" id="payEmail" name="payEmail" autocomplete="email" required>
           <span class="hint">We use this to match the receipt to your registration.</span>
@@ -534,11 +535,15 @@ function showDone(title, label, ref, text, showSee){
   done.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function showPay(ref, email, holdExpires){
+function showPay(ref, email, holdExpires, name){
   payRef = ref;
   form.style.display = "none"; payForm.style.display = "block";
   document.getElementById("payRef").textContent = ref;
+  document.getElementById("payFor").textContent = name || "";
+  document.getElementById("payForLine").style.display = name ? "" : "none";
   document.getElementById("payEmail").value = email || "";
+  // Email is already known right after registering, so only ask for it when they arrive from the emailed link
+  document.getElementById("payEmailWrap").style.display = email ? "none" : "";
   const note = document.getElementById("holdNote");
   clearInterval(timer);
   if(holdExpires){
@@ -606,7 +611,7 @@ form.addEventListener("submit", async (e) => {
       showDone("You're on the waiting list", "Your waiting list reference is", res.reference,
         "Sorry, all places are taken. We've recorded your details and will put you under waiting list or update you about the next event.", false);
     }else{
-      showPay(res.reference, payload.email, res.holdExpires);
+      showPay(res.reference, payload.email, res.holdExpires, payload.fullName);
     }
   }catch(err){
     msg.textContent = err.message + (err.fromServer ? "" : NET_HINT);
@@ -657,13 +662,13 @@ async function openFromLink(ref){
   form.style.display = "none";
   const chk = document.getElementById("linkCheck");
   chk.style.display = "block";
-  let state = "unknown";
+  let state = "unknown", name = "";
   if (wasPaidHere(ref)) state = "paid";
   else if (configured){
     try{
       const r = await fetch(`${SCRIPT_URL}?action=status&ref=${encodeURIComponent(ref)}`);
       const s = await r.json();
-      if (s && s.ok && s.paymentStatus) state = s.paymentStatus;   // "pending" | "paid" | "notfound"
+      if (s && s.ok && s.paymentStatus){ state = s.paymentStatus; name = s.name || ""; }   // "pending" | "paid" | "notfound"
     }catch(e){ /* fall through: the server still refuses a second upload */ }
   }
   chk.style.display = "none";
@@ -673,7 +678,7 @@ async function openFromLink(ref){
     showDone("We couldn't find that registration", "Reference in the link", ref,
       "Check that you opened the full link from your email. You can start a new registration with the button below, or email the organisers.", false);
   }
-  else showPay(ref, "", null);
+  else showPay(ref, "", null, name);
 }
 if (qRef) openFromLink(qRef.trim());
 
