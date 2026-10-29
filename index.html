@@ -498,6 +498,10 @@ function readFileBase64(file){
   });
 }
 
+// An error the server sent back (e.g. "already registered") is flagged, so only real network failures get the connection hint
+function serverError(text){ const e = new Error(text); e.fromServer = true; return e; }
+const NET_HINT = " Check your connection and try again. If it keeps failing, email the organisers.";
+
 function post(body){
   // text/plain avoids a CORS preflight, which Apps Script can't answer
   return fetch(SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -596,7 +600,7 @@ form.addEventListener("submit", async (e) => {
       photo: fd.get("photo") ? "Yes" : "No"
     };
     const res = await post(payload);
-    if (!res.ok) throw new Error(res.error || "Registration didn't go through.");
+    if (!res.ok) throw serverError(res.error || "Registration didn't go through.");
 
     if (res.status === "waitlist"){
       showDone("You're on the waiting list", "Your waiting list reference is", res.reference,
@@ -605,7 +609,7 @@ form.addEventListener("submit", async (e) => {
       showPay(res.reference, payload.email, res.holdExpires);
     }
   }catch(err){
-    msg.textContent = err.message + " Check your connection and try again. If it keeps failing, email the organisers.";
+    msg.textContent = err.message + (err.fromServer ? "" : NET_HINT);
     msg.classList.add("bad");
   }finally{
     btn.disabled = false; btn.textContent = btnLabel;
@@ -632,7 +636,7 @@ payForm.addEventListener("submit", async (e) => {
       proof: { name: file.name, type: file.type, data: await readFileBase64(file) } });
     if (!res.ok){
       if (res.code === "already_paid"){ markPaid(payRef); showAlreadyPaid(payRef); return; }
-      throw new Error(res.error || "We couldn't save your receipt.");
+      throw serverError(res.error || "We couldn't save your receipt.");
     }
     clearInterval(timer);
     markPaid(payRef);
@@ -640,7 +644,7 @@ payForm.addEventListener("submit", async (e) => {
     showDone("You're registered", "Your registration reference is", payRef,
       `We've sent a confirmation to ${email}. The organisers will check your payment and get in touch if anything's missing.`, true);
   }catch(ex){
-    pm.textContent = ex.message + " Check your connection and try again. If it keeps failing, email the organisers.";
+    pm.textContent = ex.message + (ex.fromServer ? "" : NET_HINT);
     pm.classList.add("bad");
   }finally{
     pb.disabled = false; pb.textContent = "Submit receipt";
