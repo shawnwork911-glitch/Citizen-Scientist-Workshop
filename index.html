@@ -111,6 +111,10 @@ button[disabled]{opacity:.6;cursor:progress}
 .done h2{font:700 1.8rem/1.15 var(--display);margin:0 0 .75rem}
 .done .ref{display:inline-block;background:var(--night);color:var(--glow);font:700 1.3rem/1 var(--display);
   padding:.6rem .9rem;border-radius:4px;margin:.5rem 0 1rem;letter-spacing:.04em}
+.done .again{margin:1.75rem 0 .25rem;padding-top:1.25rem;border-top:1px solid var(--line);font-size:1.05rem}
+.actions{display:flex;flex-wrap:wrap;gap:.75rem;margin-top:.75rem}
+button.secondary{background:transparent;color:var(--night);box-shadow:inset 0 0 0 2px var(--night)}
+button.secondary:hover{background:var(--lichen)}
 .holdnote{background:#F7E7C4;border:1px solid #E2C27A;border-radius:4px;padding:1rem;margin-bottom:1.5rem}
 .hold{margin-top:.5rem}
 .closed{background:#F7E7C4;border:1px solid #E2C27A;border-radius:4px;padding:1rem;margin-bottom:1.5rem;display:none}
@@ -365,6 +369,22 @@ button[disabled]{opacity:.6;cursor:progress}
       <div class="ref" id="refNo"></div>
       <p id="doneMsg"></p>
       <p id="doneSee">See you at Wisma Bakti on Sunday, 15 November at 5:00pm. Bring a torch with a red filter if you have one, insect repellent, closed shoes, and a water bottle.</p>
+      <div id="againBlock">
+        <p class="again"><strong>Would you like to register another participant?</strong></p>
+        <div class="actions">
+          <button type="button" id="anotherBtn">Yes, register another</button>
+          <button type="button" id="quitBtn" class="secondary">No, I'm done</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="done" id="linkCheck" aria-live="polite" style="display:none">
+      <p style="margin:0">Checking your registration…</p>
+    </section>
+
+    <section class="done" id="goodbye" tabindex="-1" aria-live="polite" style="display:none">
+      <h2>Thank you!</h2>
+      <p>Your registration is complete. You can close this tab now. See you at Bukit Kiara.</p>
     </section>
   </div>
 </main>
@@ -484,6 +504,19 @@ function post(body){
     body: JSON.stringify(body) }).then(r => r.json());
 }
 
+/* ---- Remember paid references in this browser (the server is the real check) ---- */
+function paidKey(ref){ return "fobk-paid:" + ref.toUpperCase(); }
+function markPaid(ref){ try{ localStorage.setItem(paidKey(ref), "1"); }catch(e){} }
+function wasPaidHere(ref){ try{ return localStorage.getItem(paidKey(ref)) === "1"; }catch(e){ return false; } }
+function clearRefFromUrl(){ try{ history.replaceState(null, "", location.pathname); }catch(e){} }
+
+function showAlreadyPaid(ref){
+  clearInterval(timer);
+  clearRefFromUrl();
+  showDone("Your receipt is already in", "Registration reference", ref,
+    "We already have the payment receipt for this registration, so this link can't be used again. The organisers will get in touch if anything's missing.", false);
+}
+
 function showDone(title, label, ref, text, showSee){
   document.getElementById("doneTitle").textContent = title;
   document.getElementById("refLabel").textContent = label;
@@ -597,8 +630,13 @@ payForm.addEventListener("submit", async (e) => {
   try{
     const res = await post({ action: "pay", reference: payRef, email,
       proof: { name: file.name, type: file.type, data: await readFileBase64(file) } });
-    if (!res.ok) throw new Error(res.error || "We couldn't save your receipt.");
+    if (!res.ok){
+      if (res.code === "already_paid"){ markPaid(payRef); showAlreadyPaid(payRef); return; }
+      throw new Error(res.error || "We couldn't save your receipt.");
+    }
     clearInterval(timer);
+    markPaid(payRef);
+    clearRefFromUrl();
     showDone("You're registered", "Your registration reference is", payRef,
       `We've sent a confirmation to ${email}. The organisers will check your payment and get in touch if anything's missing.`, true);
   }catch(ex){
@@ -609,8 +647,45 @@ payForm.addEventListener("submit", async (e) => {
   }
 });
 
-// Coming back from the emailed "complete your payment" link
-if (qRef) showPay(qRef.trim(), "", null);
+// Coming back from the emailed "complete your payment" link.
+// If a receipt was already uploaded for this reference, the link no longer opens the payment form.
+async function openFromLink(ref){
+  form.style.display = "none";
+  const chk = document.getElementById("linkCheck");
+  chk.style.display = "block";
+  let state = "unknown";
+  if (wasPaidHere(ref)) state = "paid";
+  else if (configured){
+    try{
+      const r = await fetch(`${SCRIPT_URL}?action=status&ref=${encodeURIComponent(ref)}`);
+      const s = await r.json();
+      if (s && s.ok && s.paymentStatus) state = s.paymentStatus;   // "pending" | "paid" | "notfound"
+    }catch(e){ /* fall through: the server still refuses a second upload */ }
+  }
+  chk.style.display = "none";
+  if (state === "paid"){ markPaid(ref); showAlreadyPaid(ref); }
+  else if (state === "notfound"){
+    clearRefFromUrl();
+    showDone("We couldn't find that registration", "Reference in the link", ref,
+      "Check that you opened the full link from your email. You can start a new registration with the button below, or email the organisers.", false);
+  }
+  else showPay(ref, "", null);
+}
+if (qRef) openFromLink(qRef.trim());
+
+/* ---- After finishing: register another participant, or quit ---- */
+document.getElementById("anotherBtn").addEventListener("click", () => {
+  // Full reload on the bare page URL: blank form, fresh seat count, no ?ref in the address bar
+  location.href = location.pathname;
+});
+document.getElementById("quitBtn").addEventListener("click", () => {
+  window.close();   // only works if this tab was opened by a script; otherwise show the goodbye note
+  form.style.display = "none"; payForm.style.display = "none";
+  document.getElementById("done").style.display = "none";
+  const bye = document.getElementById("goodbye");
+  bye.style.display = "block";
+  bye.focus();
+});
 
 /* ---- Fireflies in the hero ---- */
 (function(){
